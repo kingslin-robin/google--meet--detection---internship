@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "GMeet Meeting Tracker",
+  "version": "1.0",
+  "description": "Tracks when a Google Meet starts and ends with duration.",
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
