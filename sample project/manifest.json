@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Google Meet Recorder",
+  "version": "1.0",
+  "description": "Record Google Meet meetings with video + audio",
+  "permissions": [
+    "tabs",
+    "tabCapture",
+    "downloads",
+    "storage",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts":[
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["recorder.html", "recorder.js"],
+      "matches": ["https://meet.google.com/*"]
+    }
+  ]
+}
