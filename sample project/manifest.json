@@ -8,7 +8,9 @@
     "tabCapture",
     "downloads",
     "storage",
-    "notifications"
+    "notifications",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://meet.google.com/*"
