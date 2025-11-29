@@ -1,4 +1,5 @@
-// FIXED RECORDER - RESOLVED activeTab PERMISSION ERROR
+// RECORDER - Media recording, Audio mixing, Timer management, Status broadcasting, Download handling
+
 let mediaRecorder;
 let recordedChunks = [];
 let isRecording = false;
@@ -14,7 +15,7 @@ let currentTabId = null;
 
 console.log("🎬 GMeet Recorder tab loaded");
 
-// SAFE DOM HELPER FUNCTION
+// Safe dom helper function
 function safeSetStatus(message) {
   const statusElement = document.getElementById("status");
   if (statusElement) {
@@ -53,7 +54,7 @@ function updateToggleDisplay() {
   }
 }
 
-// Add tab closure detection
+// Tab closure detection
 function setupTabClosureDetection(tabId) {
   const tabCheckInterval = setInterval(async () => {
     if (!isRecording) {
@@ -85,11 +86,12 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
-// BROADCAST FUNCTIONS FOR MEET TAB
-function broadcastToMeetTab(message) {
+// Broadcast functions for meet tab 
+function broadcastToMeetTab(message, duration = 4000){
     chrome.runtime.sendMessage({
         action: "showMeetStatus", 
-        message: message
+        message: message,
+        duration: duration
     });
 }
 
@@ -100,7 +102,30 @@ function broadcastTimerUpdate(timeStr) {
     });
 }
 
-// 🆕 FIXED: Proper async message handling
+function checkRecorderInitialization() {
+  // If the page doesn't have basic functionality after 5 seconds, it's failed
+  setTimeout(() => {
+    if (typeof mediaRecorder === 'undefined' && !isRecording) {
+      console.error("❌ Recorder page failed to initialize properly");
+      safeSetStatus("❌ Recorder failed - closing tab");
+      
+      // Notify background about failure
+      chrome.runtime.sendMessage({ 
+        action: "recorderFailed",
+        error: "Failed to initialize",
+        tabId: currentTabId
+      });
+      
+      // Close tab after short delay
+      setTimeout(() => {
+        window.close();
+      }, 2000);
+    }
+  }, 5000);
+}
+
+
+// Proper async message handling
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log("📨 Recorder received:", message.action);
 
@@ -121,6 +146,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         stopRecording();
         sendResponse({ success: true });
       }
+
+      else if (message.action === "healthCheck") {
+        console.log("❤️ Recorder health check received");
+          sendResponse({ 
+          status: "healthy", 
+          service: "recorder",
+          isRecording: isRecording,
+          chunksCount: recordedChunks.length
+        });
+      }
+
       else {
         sendResponse({ success: false, reason: "unknown_action" });
       }
@@ -131,28 +167,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   };
 
   handleAsync();
-  return true; // 🆕 Keep message channel open for async response
+  return true; 
 });
 
-// 🆕 FIXED: Improved recording start with activeTab permission handling
+// Improved recording start with activeTab permission handling
 async function startRecording(tabId) {
   console.log("🎬 Starting recording for tab:", tabId);
+  
+  // Reset state to prevent conflicts
+  if (isRecording) {
+    console.log("⚠️ Already recording - stopping previous session");
+    stopRecording();
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for cleanup
+  }
 
   await syncToggleState();
 
+  // Double-check we're not already recording
   if (isRecording) {
-    console.log("⚠️ Already recording");
+    console.log("❌ Still recording from previous session - aborting");
     return;
   }
 
   try {
-    safeSetStatus("🟡 Starting recording...");
-    broadcastToMeetTab("🔴 Recording started...");
+    // Different messages for auto vs manual mode
+    if (isAutoRecord) {
+      safeSetStatus("🟡 Auto recording starting...");
+      broadcastToMeetTab("🟡 Auto recording starting...");
+    } else {
+      safeSetStatus("🟡 Starting recording...");
+      broadcastToMeetTab("🟡 Starting recording...");
+    }
     
-    // 🆕 ADD 1 SECOND DELAY TO ENSURE STABILITY
+    // Add 1 sec delay to ensure stability
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // 🆕 FIXED: Use chrome.tabs.get to validate tab before capture
+    // Use chrome.tabs.get to validate tab before capture
     const tab = await new Promise((resolve, reject) => {
       chrome.tabs.get(tabId, (tab) => {
         if (chrome.runtime.lastError) {
@@ -174,13 +224,13 @@ async function startRecording(tabId) {
         audioConstraints: {
           mandatory: {
             chromeMediaSource: 'tab',
-            chromeMediaSourceId: tabId.toString(), // 🆕 Ensure string format
+            chromeMediaSourceId: tabId.toString(), 
           }
         },
         videoConstraints: {
           mandatory: {
             chromeMediaSource: 'tab',
-            chromeMediaSourceId: tabId.toString(), // 🆕 Ensure string format
+            chromeMediaSourceId: tabId.toString(), 
             minWidth: 1280,
             minHeight: 720,
             maxWidth: 1920,
@@ -255,7 +305,7 @@ async function startRecording(tabId) {
     
     console.log("✅ Audio setup: Meet audio → Recording + Playback, Microphone → Recording only");
 
-    // FIXED MUTE DETECTION FUNCTION
+    // Mute detection function
     const updateMicrophoneMute = async () => {
       try {
         const response = await new Promise((resolve) => {
@@ -300,14 +350,20 @@ async function startRecording(tabId) {
     if (sourceVideoTrack) {
       sourceVideoTrack.onended = () => {
         console.log("❌ Source video track ended - Meet tab closed");
-        stopRecording();
+        if (isRecording) {
+          console.log("🎬 Recording active - stopping properly");
+          stopRecording();
+        }
       };
     }
 
     if (sourceAudioTrack) {
       sourceAudioTrack.onended = () => {
         console.log("❌ Source audio track ended - Meet tab closed");
-        stopRecording();
+        if (isRecording) {
+          console.log("🎬 Recording active - stopping properly");
+          stopRecording();
+        }
       };
     }
 
@@ -354,8 +410,30 @@ async function startRecording(tabId) {
     mediaRecorder.onstop = () => {
       console.log("🛑 Recording stopped, total chunks:", recordedChunks.length);
       stopTimer();
-      downloadRecording();
-      cleanup();
+
+      // Mark recording as inactive immediately when stopped
+      isRecording = false;
+  
+      // Broadcast stopped status for both modes
+      if (isAutoRecord) {
+        broadcastToMeetTab("🟡 Auto Recording Stopped");
+      } else {
+        broadcastToMeetTab("🟡 Recording Stopped");
+      }
+  
+      // FIXED: Only proceed with download if we have chunks
+      if (recordedChunks.length > 0) {
+        downloadRecording();
+      } else {
+        // If no chunks, then it's a failure
+        safeSetStatus("❌ No recording data");
+        if (isAutoRecord) {
+          broadcastToMeetTab("❌ Auto Recording Failed - No data");
+        } else {
+        broadcastToMeetTab("❌ Recording Failed - No data");
+      }
+    cleanup();
+  }
     };
 
     mediaRecorder.onerror = e => {
@@ -373,16 +451,19 @@ async function startRecording(tabId) {
     await chrome.storage.local.set({ isRecording: true, recordingStartTime });
     chrome.runtime.sendMessage({ action: "recordingStarted" });
     
-    console.log("✅ Recording started successfully!");
-    console.log("🎧 Meet audio is now audible in the tab while recording");
-    console.log("🎤 Recording follows Google Meet mute/unmute status");
+    console.log("Recording is starting...");
+    if (isAutoRecord) {
+      broadcastToMeetTab("🔴 Auto Recording Started");
+    } else {
+      broadcastToMeetTab("🔴 Recording Started");
+    }    
 
   } catch (err) {
     console.error("❌ Recording start failed:", err);
     safeSetStatus("❌ Recording failed: " + err.message);
-    broadcastToMeetTab("❌ Recording failed");
+    broadcastToMeetTab("❌ Recording failed. \nTry clicking the Reset button in UI to restart auto-recording.");
     
-    // 🆕 Clean up on failure
+    // Clean up on failure
     cleanup();
   }
 }
@@ -425,7 +506,8 @@ function downloadRecording() {
   if (!recordedChunks.length) {
     console.error("❌ No recording data available");
     safeSetStatus("❌ No recording data");
-    broadcastToMeetTab("❌ Recording failed: No data");
+    const message = isAutoRecord ? "❌ Auto Recording failed: No data" : "❌ Recording failed: No data";
+    broadcastToMeetTab(message);
     return;
   }
 
@@ -435,6 +517,9 @@ function downloadRecording() {
   const url = URL.createObjectURL(blob);
   const timestamp = new Date().toISOString().replace(/[:.]/g,'-').replace('T','_').split('Z')[0];
   const filename = `gmeet-recording-${timestamp}.webm`;
+
+  const stoppedMessage = isAutoRecord ? "🟡 Auto Recording Stopped" : "🟡 Recording Stopped";
+  broadcastToMeetTab(stoppedMessage);
 
   chrome.downloads.download({ url, filename, saveAs: false }, (downloadId) => {
     if (chrome.runtime.lastError) {
@@ -447,60 +532,141 @@ function downloadRecording() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } else {
-      console.log("✅ AUTO-DOWNLOAD started with ID:", downloadId);
-      broadcastToMeetTab("✅ Recording saved!");
+      console.log("✅ DOWNLOAD started with ID:", downloadId);
     }
+    
+    const downloadedMessage = isAutoRecord ? "✅ Auto Recording Downloaded" : "✅ Recording Downloaded";
+    broadcastToMeetTab(downloadedMessage);
+    
+    
+    // Send completion message
+    chrome.runtime.sendMessage({ action: "recordingCompleted" });
+    
     safeSetStatus("✅ Recording Auto-Downloaded!");
-  });
+
+    // Mark recording as inactive to prevent beforeunload confirmation
+    isRecording = false;
+
+    console.log("🔒 Closing recorder tab in 2 seconds");
+        setTimeout(() => {
+            console.log("🔒 Closing recorder tab");
+            window.close();
+        }, 2000);
+  });  
 }
 
+// Comprehensive cleanup function
+function comprehensiveCleanup() {
+    console.log("🧹 Comprehensive cleanup started");
+    
+    // Stop recording if active
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        console.log("🛑 Stopping media recorder");
+        mediaRecorder.stop();
+    }
+    
+    // Clear all intervals
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        console.log("✅ Timer interval cleared");
+    }
+    
+    if (muteCheckInterval) {
+        clearInterval(muteCheckInterval);
+        muteCheckInterval = null;
+        console.log("✅ Mute check interval cleared");
+    }
+    
+    // Stop all media tracks
+    if (mediaRecorder?.stream) {
+        mediaRecorder.stream.getTracks().forEach(track => {
+            track.stop();
+            console.log("✅ Media track stopped:", track.kind);
+        });
+    }
+    
+    if (globalMicStream) {
+        globalMicStream.getTracks().forEach(track => {
+            track.stop();
+            console.log("✅ Microphone track stopped");
+        });
+        globalMicStream = null;
+    }
+    
+    // Close audio context
+    if (originalAudioContext) {
+        originalAudioContext.close().catch(e => console.log("AudioContext close error:", e));
+        originalAudioContext = null;
+        console.log("✅ Audio context closed");
+    }
+    
+    // Clean up global mic gain node
+    if (globalMicGainNode) {
+        globalMicGainNode.disconnect();
+        globalMicGainNode = null;
+        console.log("✅ Mic gain node cleaned");
+    }
+    
+    // Clear recorded chunks to free memory
+    recordedChunks = [];
+    console.log("✅ Recorded chunks cleared");
+    
+    // Reset states
+    isRecording = false;
+    isAutoRecord = false;
+    currentTabId = null;
+    console.log("✅ States reset");
+    
+    // Clear storage
+    chrome.storage.local.set({ 
+        isRecording: false,
+        recordingStoppedByTabClose: true 
+    }, () => {
+        chrome.storage.local.remove(['recordingTime', 'recordingStartTime']);
+        chrome.runtime.sendMessage({ action: "recordingStopped" });
+        console.log("✅ Storage cleared");
+    });             
+    
+    console.log("✅ Comprehensive cleanup completed");
+}
+
+// Refresh extension function
+function refreshExtension() {
+    console.log("🔄 Refreshing extension state...");
+    comprehensiveCleanup();
+    
+    // Notify background to reset states
+    chrome.runtime.sendMessage({ 
+        action: "refreshExtensionState" 
+    });
+    
+    // Close recorder tab if in auto mode
+    if (isAutoRecord) {
+        setTimeout(() => {
+            window.close();
+        }, 2000);
+    }
+}
+
+// Cleanup function
 function cleanup() {
-  console.log("🧹 Cleaning up recording resources");
-  isRecording = false;
-  stopTimer();
-
-  // Clear mute check interval
-  if (muteCheckInterval) {
-    clearInterval(muteCheckInterval);
-    muteCheckInterval = null;
-  }
-
-  // Close audio context
-  if (originalAudioContext) {
-    originalAudioContext.close().catch(e => console.log("AudioContext close error:", e));
-    originalAudioContext = null;
-  }
-
-  // Clean up global mic gain node
-  if (globalMicGainNode) {
-    globalMicGainNode.disconnect();
-    globalMicGainNode = null;
-  }
-
-  if (mediaRecorder?.stream) {
-    mediaRecorder.stream.getTracks().forEach(track => track.stop());
-  }
-
-  if (globalMicStream) {
-    globalMicStream.getTracks().forEach(track => track.stop());
-    globalMicStream = null;
-  }
+  console.log("🧹 Standard cleanup started");
   
-  recordedChunks = [];
-  
-  chrome.storage.local.set({ 
-    isRecording: false,
-    recordingStoppedByTabClose: true 
-  }, () => {
-    chrome.storage.local.remove(['recordingTime', 'recordingStartTime']);
-    chrome.runtime.sendMessage({ action: "recordingStopped" });
-  });
-
-  broadcastToMeetTab("✅ Recording Stopped and Auto-Downloaded");
-  safeSetStatus("✅ Recording completed");
-
-  console.log("🤖 Closing recorder tab in 3 seconds");
-  setTimeout(() => window.close(), 3000);
+  if (isRecording && recordedChunks.length > 0) {
+    comprehensiveCleanup();
+  } else {
+    // Minimal cleanup for normal stop cases
+    stopTimer();
+    if (muteCheckInterval) {
+      clearInterval(muteCheckInterval);
+      muteCheckInterval = null;
+    }
+    
+    // Reset states
+    isRecording = false;
+    console.log("✅ Standard cleanup completed");
+  }
 }
 
 // Keep tab alive for auto-recording
@@ -508,45 +674,110 @@ setInterval(() => {
   if (isRecording) console.log("💓 Recorder alive -", document.getElementById("timer")?.textContent); 
 }, 30000);
 
+
 window.addEventListener('beforeunload', (event) => {
   if (isRecording && recordedChunks.length > 0) {
-    console.log("🚨 Recorder tab closing during recording");
-    const recordingData = {
-      timestamp: Date.now(),
-      chunkCount: recordedChunks.length
-    };
-    sessionStorage.setItem('pendingRecording', JSON.stringify(recordingData));
-    event.preventDefault();
-    event.returnValue = '';
-    return '';
+    // AUTO MODE: No permission prompt - just auto-download and close
+    if (isAutoRecord) {
+      console.log("🤖 Auto-record: Closing recorder tab - auto-downloading recording");
+      
+      // Stop recording and trigger download immediately
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      
+      // ❌ REMOVE THESE LINES - they trigger the confirmation dialog
+      // event.preventDefault();
+      // event.returnValue = '';
+      
+      // Force download after a short delay
+      setTimeout(() => {
+        downloadRecording();
+      }, 500);
+      
+      // ✅ Just return without preventing default - allows silent closure
+      return;
+    } 
+    // MANUAL MODE: Show confirmation dialog, but don't stop/download until user confirms
+    else {
+      console.log("🚨 Manual recording: Showing leave confirmation dialog");
+      
+      // Don't stop recording here - wait for user decision
+      // Just show the browser's native confirmation dialog
+      event.preventDefault();
+      event.returnValue = 'Recording is in progress. Are you sure you want to leave?';
+      
+      return event.returnValue;
+    }
+  } // If recording is NOT active (already stopped/downloaded), allow silent closure
+  else {
+    console.log("✅ Recording not active - allowing silent tab closure");
+    // No event.preventDefault() - allow the tab to close silently
   }
 });
 
+// Handle the actual tab closure with auto-download for auto mode
 window.addEventListener('unload', () => {
+  // Handle BOTH auto-record AND manual mode closures
+  if (isRecording && recordedChunks.length > 0) {
+    console.log(`🤖 ${isAutoRecord ? 'Auto' : 'Manual'} recording: Tab closing - ensuring recording is saved`);
+
+    // AUTO MODE: Stop and download immediately
+    if (isAutoRecord) {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        console.log("🛑 Auto-mode: Stopping recording before tab close");
+        mediaRecorder.stop();
+      }
+      
+      // Ensure download for auto-mode
+      if (recordedChunks.length > 0) {
+        console.log("💾 Auto-mode: Auto-downloading recording");
+        setTimeout(() => {
+          downloadRecording();
+        }, 100);
+      }
+    }
+    // MANUAL MODE: Force download immediately when user confirms leave
+    else {
+      console.log("💾 Manual mode: User confirmed leave - forcing immediate download");
+      
+      // Stop recording first
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+      
+      // Force download immediately without waiting for mediaRecorder.onstop
+      if (recordedChunks.length > 0) {
+        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const timestamp = new Date().toISOString().replace(/[:.]/g,'-').replace('T','_').split('Z')[0];
+        const filename = `gmeet-recording-${timestamp}.webm`;
+        
+        // Use chrome.downloads API for reliable download
+        chrome.downloads.download({ 
+          url: url, 
+          filename: filename, 
+          saveAs: false        
+        });
+        
+        // Send completion message
+        chrome.runtime.sendMessage({ action: "recordingCompleted" });
+        chrome.runtime.sendMessage({
+          action: "showMeetStatus", 
+          message: "✅ Recording Stopped and Auto-Downloaded"
+        });
+      }
+    }
+  }
+  
+  // Handle manual mode pending recordings (only if recording was ACTIVE)
   const pendingRecording = sessionStorage.getItem('pendingRecording');
   if (pendingRecording && recordedChunks.length > 0) {
-    console.log("✅ User confirmed Leave - AUTO-DOWNLOADING recording");
-    chrome.storage.local.set({ 
-      recordingStoppedByTabClose: true,
-      isRecording: false 
-    });
-    chrome.runtime.sendMessage({ action: "recordingStopped" });
-    chrome.runtime.sendMessage({
-      action: "showMeetStatus", 
-      message: "✅ Recording Stopped and Auto-Downloaded"
-    });
-    
-    const blob = new Blob(recordedChunks, { type: 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const timestamp = new Date().toISOString().replace(/[:.]/g,'-').replace('T','_').split('Z')[0];
-    const filename = `gmeet-recording-${timestamp}.webm`;
-    
-    chrome.downloads.download({ 
-      url: url, 
-      filename: filename, 
-      saveAs: false
-    });
-    
+    console.log("✅ Cleaning up old pending recording");
     sessionStorage.removeItem('pendingRecording');
   }
 });
+
+console.log("🎬 GMeet Recorder tab loaded - starting initialization check");
+
+checkRecorderInitialization();
