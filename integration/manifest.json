@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "Meeting Recorder - Google Meet, Microsoft Teams & Zoom",
+  "version": "2.0.0",
+  "description": "Record Google Meet, Microsoft Teams & Zoom meetings automatically or manually with audio mixing",
+  "permissions": [
+    "activeTab",
+    "tabCapture", 
+    "storage",
+    "downloads",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://teams.microsoft.com/*", 
+    "https://teams.live.com/*",
+    "https://*.zoom.us/*",
+    "https://zoom.us/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Meeting Recorder"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*",
+        "https://*.zoom.us/*",
+        "https://zoom.us/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["recorder.html", "recorder.js"],
+      "matches": [
+        "https://meet.google.com/*",
+        "https://teams.microsoft.com/*",
+        "https://teams.live.com/*",
+        "https://*.zoom.us/*",
+        "https://zoom.us/*"
+      ]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "minimum_chrome_version": "88"
+}
