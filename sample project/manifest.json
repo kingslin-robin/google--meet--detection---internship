@@ -13,7 +13,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://meet.google.com/*"
+    "https://meet.google.com/*",
+    "https://*/*",
+    "<all_urls>"
   ],
   "action": {
     "default_popup": "popup.html"
@@ -31,7 +33,7 @@
   "web_accessible_resources": [
     {
       "resources": ["recorder.html", "recorder.js"],
-      "matches": ["https://meet.google.com/*"]
+      "matches": ["<all_urls>", "chrome-extension://*/*"]
     }
   ]
 }
