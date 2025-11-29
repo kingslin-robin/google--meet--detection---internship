@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Google Meet Recorder</title>
+  <title>Meeting Recorder</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -24,32 +24,30 @@
       margin: 20px 0;
       color: #333;
     }
-    .auto-record-indicator {
-      font-size: 14px;
-      margin: 10px 0;
+    .service-badge {
+      position: absolute;
+      top: 10px;
+      right: 10px;
       padding: 5px 10px;
       border-radius: 15px;
-      display: inline-block;
+      font-size: 12px;
+      font-weight: bold;
+      color: white;
     }
-    .auto-on {
-      background: #e8f5e8;
-      color: #2e7d32;
-      border: 1px solid #4caf50;
+    .gmeet-badge {
+      background: #0f9d58;
     }
-    .auto-off {
-      background: #ffebee;
-      color: #c62828;
-      border: 1px solid #f44336;
+    .teams-badge {
+      background: #464EB8;
     }
   </style>
 </head>
 <body>
-  <h2>🎬 Google Meet Recorder</h2>
+  <div id="serviceBadge" class="service-badge"></div>
+  <h2>🎬 Meeting Recorder</h2>
   <div id="timer">00:00</div>
-  <div id="autoRecordIndicator" class="auto-record-indicator">Loading...</div>  
   <div id="status">Ready to start recording...</div>
   
   <script src="recorder.js"></script>
 </body>
-
 </html>
